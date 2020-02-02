@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "GitHubDependentsScraper": {
+      "commandName": "Project",
+      "commandLineArgs": "https://github.com/npm/validate-npm-package-name/network/dependents"
+    }
+  }
+}
