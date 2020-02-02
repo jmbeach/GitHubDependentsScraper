@@ -20,17 +20,52 @@ USAGE
 ";
         static void Main(string[] args)
         {
-            if (args.Length == 0 || args.Length > 1)
+            if (args.Length == 0)
             {
                 Console.WriteLine(HELP);
                 return;
             }
 
             string url = args[0];
+            int startPage = 1;
+            int minStars;
+            if (args.Length > 1)
+            {
+                int.TryParse(args[1], out minStars);
+            }
+            else
+            {
+                minStars = 1;
+            }
+
             Dictionary<int, List<Dependency>> dependencies = new Dictionary<int, List<Dependency>>();
+            string urlAsPath = UrlUtil.GetUrlPathSafe(url);
+            if (File.Exists(urlAsPath))
+            {
+                CachedDependencies cached = TryLoadDependenciesFromCache(urlAsPath);
+                if (cached != null)
+                {
+                    startPage = cached.Page;
+                    url = $"{url}?dependents_after={cached.After}";
+                    dependencies = cached.Data;
+                }
+            }
+
             using (IWebDriver driver = new ChromeDriver())
             {
-                ProcessPage(OnPageParsed, 1, dependencies, driver, url);
+                ProcessPage(OnPageParsed, startPage, minStars, dependencies, driver, url);
+            }
+        }
+
+        private static CachedDependencies TryLoadDependenciesFromCache(string urlAsPath)
+        {
+            try
+            {
+                return JsonConvert.DeserializeObject<CachedDependencies>(File.ReadAllText(urlAsPath));
+            }
+            catch(Exception)
+            {
+                return null;
             }
         }
 
@@ -45,23 +80,24 @@ USAGE
             Dictionary<string, object> cacheFile = new Dictionary<string, object>
             {
                 { "page", pageNumber },
+                { "after", UrlUtil.GetDependentsAfter(url) },
                 { "data", dependencies }
             };
             File.WriteAllText(UrlUtil.GetUrlPathSafe(url), JsonConvert.SerializeObject(cacheFile, Formatting.Indented));
         }
 
-        private static void ProcessPage(Action<string, int, Dictionary<int, List<Dependency>>> onPageParsed, int pageNumber, Dictionary<int, List<Dependency>> dependencies, IWebDriver driver, string url)
+        private static void ProcessPage(Action<string, int, Dictionary<int, List<Dependency>>> onPageParsed, int pageNumber, int minStars, Dictionary<int, List<Dependency>> dependencies, IWebDriver driver, string url)
         {
             driver.Url = url;
             ReadOnlyCollection<IWebElement> rows = driver.FindElements(By.CssSelector(SELECTOR_DEPENDENCY));
             foreach (IWebElement row in rows)
             {
                 Dependency dependency = ParseDependency(row);
-                if (dependency.Stars > 0)
+                if (dependency.Stars > minStars)
                 {
                     if (dependencies.ContainsKey(dependency.Stars))
                     {
-
+                        dependencies[dependency.Stars].Add(dependency);
                     }
                     else
                     {
@@ -74,7 +110,7 @@ USAGE
             if (nextButton.Text == "Next")
             {
                 onPageParsed(url, pageNumber, dependencies);
-                ProcessPage(onPageParsed, pageNumber + 1, dependencies, driver, nextButton.GetAttribute("href"));
+                ProcessPage(onPageParsed, pageNumber + 1, minStars, dependencies, driver, nextButton.GetAttribute("href"));
             }
             else
             {
